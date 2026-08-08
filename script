@@ -1,0 +1,2826 @@
+# ============================================================
+# PASSIVE WEB SECURITY ANALYZER v3.0
+# PART 1/8 - CORE SYSTEM
+# ============================================================
+
+
+import os
+import sys
+import time
+import json
+import socket
+import ssl
+import datetime
+import requests
+from urllib.parse import urlparse
+
+
+# ============================================================
+# COLORS
+# ============================================================
+
+
+class Colors:
+
+    GREEN = "\033[92m"
+    CYAN = "\033[96m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    BLUE = "\033[94m"
+    RESET = "\033[0m"
+
+
+
+# ============================================================
+# BANNER
+# ============================================================
+
+
+BANNER = Colors.GREEN + r"""
+
+██████╗ ███████╗███╗   ██╗██╗   ██╗██╗  ██╗
+██╔══██╗██╔════╝████╗  ██║██║   ██║╚██╗██╔╝
+██████╔╝█████╗  ██╔██╗ ██║██║   ██║ ╚███╔╝
+██╔══██╗██╔══╝  ██║╚██╗██║██║   ██║ ██╔██╗
+██║  ██║███████╗██║ ╚████║╚██████╔╝██╔╝ ██╗
+╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝
+
+
+        SECURITY ANALYZER v3.0
+
+        Passive Web Security Scanner
+
+""" + Colors.RESET
+
+
+
+
+# ============================================================
+# GLOBAL DATA
+# ============================================================
+
+
+SCAN_HISTORY = []
+
+
+
+CONFIG = {
+
+    "timeout": 15,
+
+    "user_agent":
+    "SecurityAnalyzer/3.0"
+
+}
+
+
+
+# ============================================================
+# WAF DATABASE
+# ============================================================
+
+
+WAF_SIGNATURES = {
+
+
+    "Cloudflare WAF": {
+
+        "vendor": "Cloudflare",
+
+        "type":
+        "Cloud WAF / Reverse Proxy / CDN",
+
+        "headers": [
+
+            "cf-ray",
+
+            "cf-cache-status",
+
+            "server: cloudflare"
+
+        ]
+
+    },
+
+
+    "AWS WAF": {
+
+        "vendor": "Amazon",
+
+        "type":
+        "Cloud WAF",
+
+        "headers": [
+
+            "x-amzn-requestid",
+
+            "x-amz-cf-id"
+
+        ]
+
+    },
+
+
+    "F5 BIG-IP ASM": {
+
+        "vendor": "F5 Networks",
+
+        "type":
+        "Enterprise Application Firewall",
+
+        "headers": [
+
+            "x-wa-info",
+
+            "bigipserver",
+
+            "f5"
+
+        ]
+
+    },
+
+
+    "Sucuri WAF": {
+
+        "vendor": "Sucuri",
+
+        "type":
+        "Cloud WAF",
+
+        "headers": [
+
+            "x-sucuri-id",
+
+            "x-sucuri-cache"
+
+        ]
+
+    }
+
+}
+
+
+
+
+# ============================================================
+# START MESSAGE
+# ============================================================
+
+
+def show_startup():
+
+    os.system(
+        "cls" if os.name == "nt" else "clear"
+    )
+
+    print(BANNER)# ============================================================
+# PART 2/8 - HELPER FUNCTIONS + HTTP ENGINE
+# ============================================================
+
+
+
+# ============================================================
+# CLEAR SCREEN
+# ============================================================
+
+
+def clear_screen():
+
+    os.system(
+        "cls" if os.name == "nt" else "clear"
+    )
+
+
+
+
+# ============================================================
+# PAUSE
+# ============================================================
+
+
+def pause():
+
+    input(
+        "\nPress Enter to continue..."
+    )
+
+
+
+
+# ============================================================
+# URL NORMALIZER
+# ============================================================
+
+
+def normalize_url(url):
+
+
+    url = url.strip()
+
+
+
+    if not url.startswith(
+        "http://"
+    ) and not url.startswith(
+        "https://"
+    ):
+
+        url = "https://" + url
+
+
+
+    return url
+
+
+
+
+# ============================================================
+# DOMAIN EXTRACTOR
+# ============================================================
+
+
+def get_domain(url):
+
+    parsed = urlparse(url)
+
+    return parsed.netloc
+
+
+
+
+# ============================================================
+# HTTP REQUEST ENGINE
+# ============================================================
+
+
+def send_request(url):
+
+
+    headers = {
+
+
+        "User-Agent":
+
+        CONFIG["user_agent"]
+
+    }
+
+
+
+    try:
+
+
+        response = requests.get(
+
+            url,
+
+            headers=headers,
+
+            timeout=CONFIG["timeout"],
+
+            allow_redirects=True
+
+        )
+
+
+        return response
+
+
+
+    except requests.exceptions.SSLError:
+
+
+        print(
+
+            Colors.RED +
+
+            "SSL certificate error" +
+
+            Colors.RESET
+
+        )
+
+
+        return None
+
+
+
+    except requests.exceptions.Timeout:
+
+
+        print(
+
+            Colors.RED +
+
+            "Connection timeout" +
+
+            Colors.RESET
+
+        )
+
+
+        return None
+
+
+
+    except requests.exceptions.ConnectionError:
+
+
+        print(
+
+            Colors.RED +
+
+            "Connection failed" +
+
+            Colors.RESET
+
+        )
+
+
+        return None
+
+
+
+    except Exception as e:
+
+
+        print(
+
+            Colors.RED +
+
+            "Error: "
+
+            +
+
+            str(e)
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+        return None
+
+
+
+
+# ============================================================
+# BASIC RESPONSE INFORMATION
+# ============================================================
+
+
+def get_basic_info(url, response):
+
+
+    info = {
+
+
+        "url":
+
+        url,
+
+
+        "status_code":
+
+        response.status_code,
+
+
+        "server":
+
+        response.headers.get(
+
+            "Server",
+
+            "Unknown"
+
+        ),
+
+
+        "content_length":
+
+        len(response.text)
+
+    }
+
+
+
+    return info# ============================================================
+# PART 3/8 - TECHNOLOGY + WAF INTELLIGENCE
+# ============================================================
+
+
+
+# ============================================================
+# TECHNOLOGY DETECTION
+# ============================================================
+
+
+def analyze_technology(response):
+
+
+    technologies = []
+
+
+
+    headers = response.headers
+
+
+
+    server = headers.get(
+
+        "Server",
+
+        ""
+
+    ).lower()
+
+
+
+    powered = headers.get(
+
+        "X-Powered-By",
+
+        ""
+
+    ).lower()
+
+
+
+    body = response.text.lower()
+
+
+
+    fingerprints = {
+
+
+        "Apache":
+
+        [
+
+            "apache"
+
+        ],
+
+
+        "Nginx":
+
+        [
+
+            "nginx"
+
+        ],
+
+
+        "PHP":
+
+        [
+
+            "php",
+
+            "x-powered-by: php"
+
+        ],
+
+
+        "ASP.NET":
+
+        [
+
+            "asp.net",
+
+            "x-powered-by: asp.net"
+
+        ],
+
+
+        "WordPress":
+
+        [
+
+            "wp-content",
+
+            "wordpress"
+
+        ],
+
+
+        "Laravel":
+
+        [
+
+            "laravel"
+
+        ]
+
+    }
+
+
+
+
+    data = (
+
+        server
+
+        +
+
+        powered
+
+        +
+
+        body
+
+    )
+
+
+
+    for tech, signs in fingerprints.items():
+
+
+        for sign in signs:
+
+
+            if sign in data:
+
+
+                technologies.append(
+
+                    tech
+
+                )
+
+
+                break
+
+
+
+    return list(
+
+        set(
+
+            technologies
+
+        )
+
+    )
+
+
+
+
+
+# ============================================================
+# WAF INTELLIGENCE
+# ============================================================
+
+
+def analyze_waf(response):
+
+
+    results = []
+
+
+
+    headers = {
+
+        k.lower():
+
+        v.lower()
+
+        for k,v in response.headers.items()
+
+    }
+
+
+
+    combined = (
+
+        str(headers)
+
+        +
+
+        response.text.lower()
+
+    )
+
+
+
+    for name, data in WAF_SIGNATURES.items():
+
+
+        evidence = []
+
+
+
+        for signature in data["headers"]:
+
+
+
+            if (
+
+                signature.lower()
+
+                in
+
+                combined
+
+            ):
+
+
+                evidence.append(
+
+                    signature
+
+                )
+
+
+
+        if evidence:
+
+
+
+            confidence = min(
+
+                95,
+
+                40
+
+                +
+
+                (
+
+                    len(evidence)
+
+                    *
+
+                    20
+
+                )
+
+            )
+
+
+
+            results.append({
+
+
+                "name":
+
+                name,
+
+
+                "vendor":
+
+                data["vendor"],
+
+
+                "type":
+
+                data["type"],
+
+
+                "evidence":
+
+                evidence,
+
+
+                "confidence":
+
+                confidence
+
+
+            })
+
+
+
+    return results
+
+
+
+
+
+# ============================================================
+# DISPLAY WAF RESULT
+# ============================================================
+
+
+def display_waf(results):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\nFirewall Intelligence"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    if not results:
+
+
+        print(
+
+            Colors.YELLOW
+
+            +
+
+            "No known WAF detected"
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+        return
+
+
+
+
+    for waf in results:
+
+
+        print(
+
+            Colors.GREEN
+
+            +
+
+            "✓ "
+
+            +
+
+            waf["name"]
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+        print(
+
+            " Vendor:",
+
+            waf["vendor"]
+
+        )
+
+
+        print(
+
+            " Type:",
+
+            waf["type"]
+
+        )
+
+
+        print(
+
+            " Evidence:",
+
+            ", ".join(
+
+                waf["evidence"]
+
+            )
+
+        )
+
+
+        print(
+
+            " Confidence:",
+
+            str(
+
+                waf["confidence"]
+
+            )
+
+            +
+
+            "%"
+
+        )# ============================================================
+# PART 4/8 - SECURITY HEADERS + COOKIE AUDIT
+# ============================================================
+
+
+
+# ============================================================
+# SECURITY HEADER ANALYZER
+# ============================================================
+
+
+def analyze_security_headers(response):
+
+
+    headers = {
+
+        k.lower():
+
+        v
+
+        for k, v in response.headers.items()
+
+    }
+
+
+
+    security_headers = {
+
+
+        "strict-transport-security":
+
+        {
+
+            "name":
+
+            "Strict-Transport-Security",
+
+            "severity":
+
+            "Medium"
+
+        },
+
+
+        "content-security-policy":
+
+        {
+
+            "name":
+
+            "Content-Security-Policy",
+
+            "severity":
+
+            "Medium"
+
+        },
+
+
+        "x-frame-options":
+
+        {
+
+            "name":
+
+            "X-Frame-Options",
+
+            "severity":
+
+            "Low"
+
+        },
+
+
+        "x-content-type-options":
+
+        {
+
+            "name":
+
+            "X-Content-Type-Options",
+
+            "severity":
+
+            "Low"
+
+        },
+
+
+        "referrer-policy":
+
+        {
+
+            "name":
+
+            "Referrer-Policy",
+
+            "severity":
+
+            "Low"
+
+        },
+
+
+        "permissions-policy":
+
+        {
+
+            "name":
+
+            "Permissions-Policy",
+
+            "severity":
+
+            "Low"
+
+        }
+
+    }
+
+
+
+
+    enabled = []
+
+    missing = []
+
+
+
+    for key, data in security_headers.items():
+
+
+        if key in headers:
+
+
+            enabled.append(
+
+                data["name"]
+
+            )
+
+
+        else:
+
+
+            missing.append(
+
+                {
+
+                    "name":
+
+                    data["name"],
+
+
+                    "severity":
+
+                    data["severity"]
+
+                }
+
+            )
+
+
+
+    score = int(
+
+        (
+
+            len(enabled)
+
+            /
+
+            len(security_headers)
+
+        )
+
+        *
+
+        100
+
+    )
+
+
+
+    return {
+
+
+        "enabled":
+
+        enabled,
+
+
+        "missing":
+
+        missing,
+
+
+        "score":
+
+        score
+
+    }
+
+
+
+
+
+# ============================================================
+# DISPLAY SECURITY HEADERS
+# ============================================================
+
+
+def display_security_headers(data):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\nSecurity Header Audit"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    print(
+
+        "\nSecurity Score:",
+
+        str(
+
+            data["score"]
+
+        )
+
+        +
+
+        "/100"
+
+    )
+
+
+
+    if data["enabled"]:
+
+
+        print(
+
+            "\nEnabled Headers:"
+
+        )
+
+
+        for item in data["enabled"]:
+
+
+            print(
+
+                "✓",
+
+                item
+
+            )
+
+
+
+    if data["missing"]:
+
+
+        print(
+
+            "\nMissing Headers:"
+
+        )
+
+
+        for item in data["missing"]:
+
+
+            print(
+
+                "✗",
+
+                item["name"],
+
+                "(",
+
+                item["severity"],
+
+                ")"
+
+            )
+
+
+
+
+
+
+# ============================================================
+# COOKIE SECURITY ANALYZER
+# ============================================================
+
+
+def analyze_cookies(response):
+
+
+    cookies = response.cookies
+
+
+
+    result = {
+
+
+        "count":
+
+        len(cookies),
+
+
+        "secure":
+
+        [],
+
+
+        "missing_security":
+
+        [],
+
+
+        "score":
+
+        100
+
+    }
+
+
+
+
+    for cookie in cookies:
+
+
+        name = cookie.name
+
+
+
+        secure = cookie.secure
+
+
+
+        httponly = (
+
+            "httponly"
+
+            in
+
+            str(cookie)
+
+            .lower()
+
+        )
+
+
+
+        if secure:
+
+
+            result["secure"].append(
+
+                name
+
+            )
+
+
+        else:
+
+
+            result["missing_security"].append(
+
+                name
+
+            )
+
+
+
+        if not secure or not httponly:
+
+
+            result["score"] -= 10
+
+
+
+
+    if result["score"] < 0:
+
+
+        result["score"] = 0
+
+
+
+    return result
+
+
+
+
+
+# ============================================================
+# DISPLAY COOKIE RESULT
+# ============================================================
+
+
+def display_cookies(data):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\nCookie Security Audit"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    print(
+
+        "Cookie Score:",
+
+        str(
+
+            data["score"]
+
+        )
+
+        +
+
+        "/100"
+
+    )
+
+
+
+    if data["count"] == 0:
+
+
+        print(
+
+            "No cookies detected"
+
+        )
+
+
+    else:
+
+
+        print(
+
+            "Cookies Found:",
+
+            data["count"]
+
+        )# ============================================================
+# PART 5/8 - TLS/SSL + DNS INTELLIGENCE
+# ============================================================
+
+
+
+# ============================================================
+# TLS / SSL ANALYZER
+# ============================================================
+
+
+def analyze_tls(url):
+
+
+    result = {
+
+
+        "enabled":
+
+        False,
+
+
+        "version":
+
+        "Unknown",
+
+
+        "certificate":
+
+        "Unknown",
+
+
+        "days_remaining":
+
+        None,
+
+
+        "score":
+
+        0
+
+    }
+
+
+
+
+    try:
+
+
+        parsed = urlparse(url)
+
+
+
+        host = parsed.hostname
+
+
+
+        if not host:
+
+
+            return result
+
+
+
+        context = ssl.create_default_context()
+
+
+
+        with socket.create_connection(
+
+            (host, 443),
+
+            timeout=10
+
+        ) as sock:
+
+
+
+            with context.wrap_socket(
+
+                sock,
+
+                server_hostname=host
+
+            ) as ssock:
+
+
+
+                cert = ssock.getpeercert()
+
+
+
+                result["enabled"] = True
+
+
+
+                result["version"] = (
+
+                    ssock.version()
+
+                )
+
+
+
+                result["certificate"] = (
+
+                    cert.get(
+
+                        "notAfter",
+
+                        "Unknown"
+
+                    )
+
+                )
+
+
+
+                if cert.get("notAfter"):
+
+
+                    expire = datetime.datetime.strptime(
+
+                        cert["notAfter"],
+
+                        "%b %d %H:%M:%S %Y %Z"
+
+                    )
+
+
+
+                    now = datetime.datetime.utcnow()
+
+
+
+                    days = (
+
+                        expire - now
+
+                    ).days
+
+
+
+                    result["days_remaining"] = days
+
+
+
+                    if days > 30:
+
+
+                        result["score"] = 100
+
+
+                    else:
+
+
+                        result["score"] = 50
+
+
+
+    except Exception:
+
+
+        pass
+
+
+
+    return result
+
+
+
+
+
+# ============================================================
+# DISPLAY TLS RESULT
+# ============================================================
+
+
+def display_tls(data):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\nTLS / SSL Analysis"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    if not data["enabled"]:
+
+
+        print(
+
+            "HTTPS not detected"
+
+        )
+
+
+        return
+
+
+
+    print(
+
+        "✓ HTTPS Enabled"
+
+    )
+
+
+
+    print(
+
+        "TLS Version:",
+
+        data["version"]
+
+    )
+
+
+
+    print(
+
+        "Valid Until:",
+
+        data["certificate"]
+
+    )
+
+
+
+    if data["days_remaining"]:
+
+
+        print(
+
+            "Days Remaining:",
+
+            data["days_remaining"]
+
+        )
+
+
+
+    print(
+
+        "TLS Score:",
+
+        str(
+
+            data["score"]
+
+        )
+
+        +
+
+        "/100"
+
+    )
+
+
+
+
+
+
+
+# ============================================================
+# DNS INTELLIGENCE
+# ============================================================
+
+
+def analyze_dns(url):
+
+
+    domain = get_domain(url)
+
+
+
+    result = {
+
+
+        "domain":
+
+        domain,
+
+
+        "ipv4":
+
+        [],
+
+
+        "ipv6":
+
+        []
+
+    }
+
+
+
+
+    try:
+
+
+        records = socket.getaddrinfo(
+
+            domain,
+
+            None
+
+        )
+
+
+
+        for item in records:
+
+
+
+            ip = item[4][0]
+
+
+
+            if ":" in ip:
+
+
+                if ip not in result["ipv6"]:
+
+
+                    result["ipv6"].append(
+
+                        ip
+
+                    )
+
+
+            else:
+
+
+                if ip not in result["ipv4"]:
+
+
+                    result["ipv4"].append(
+
+                        ip
+
+                    )
+
+
+
+    except Exception:
+
+
+        pass
+
+
+
+    return result
+
+
+
+
+
+
+# ============================================================
+# DISPLAY DNS RESULT
+# ============================================================
+
+
+def display_dns(data):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\nDNS Intelligence"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    print(
+
+        "Domain:",
+
+        data["domain"]
+
+    )
+
+
+
+    if data["ipv4"]:
+
+
+        print(
+
+            "\nIPv4 Addresses:"
+
+        )
+
+
+        for ip in data["ipv4"]:
+
+
+            print(
+
+                " -",
+
+                ip
+
+            )
+
+
+
+    if data["ipv6"]:
+
+
+        print(
+
+            "\nIPv6 Addresses:"
+
+        )
+
+
+        for ip in data["ipv6"]:
+
+
+            print(
+
+                " -",
+
+                ip
+
+            )# ============================================================
+# PART 6/8 - CDN DETECTION + SECURITY SCORE ENGINE
+# ============================================================
+
+
+
+# ============================================================
+# CDN DETECTION
+# ============================================================
+
+
+def analyze_cdn(response):
+
+
+    headers = {
+
+        k.lower():
+
+        v.lower()
+
+        for k, v in response.headers.items()
+
+    }
+
+
+
+    text = str(headers)
+
+
+
+    cdn_signatures = {
+
+
+        "Cloudflare":
+
+        [
+
+            "cf-ray",
+
+            "cloudflare"
+
+        ],
+
+
+        "Akamai":
+
+        [
+
+            "akamai",
+
+            "x-akamai"
+
+        ],
+
+
+        "Fastly":
+
+        [
+
+            "fastly",
+
+            "x-served-by"
+
+        ],
+
+
+        "Amazon CloudFront":
+
+        [
+
+            "cloudfront",
+
+            "x-amz-cf-id"
+
+        ]
+
+    }
+
+
+
+    detected = []
+
+
+
+    for name, signs in cdn_signatures.items():
+
+
+        for sign in signs:
+
+
+            if sign in text:
+
+
+                detected.append(
+
+                    name
+
+                )
+
+
+                break
+
+
+
+    return list(
+
+        set(
+
+            detected
+
+        )
+
+    )
+
+
+
+
+
+# ============================================================
+# SECURITY SCORE ENGINE
+# ============================================================
+
+
+def calculate_security_score(
+
+        waf,
+
+        headers,
+
+        tls,
+
+        cookies
+
+):
+
+
+    score = 0
+
+
+
+    # WAF Protection
+
+    if waf:
+
+
+        score += 25
+
+
+
+    # Security Headers
+
+    score += int(
+
+        headers["score"]
+
+        *
+
+        0.30
+
+    )
+
+
+
+    # TLS
+
+    score += int(
+
+        tls["score"]
+
+        *
+
+        0.30
+
+    )
+
+
+
+    # Cookies
+
+    score += int(
+
+        cookies["score"]
+
+        *
+
+        0.15
+
+    )
+
+
+
+    if score > 100:
+
+
+        score = 100
+
+
+
+    return score
+
+
+
+
+
+# ============================================================
+# GRADE SYSTEM
+# ============================================================
+
+
+def calculate_grade(score):
+
+
+    if score >= 90:
+
+        return "A"
+
+
+
+    elif score >= 75:
+
+        return "B"
+
+
+
+    elif score >= 60:
+
+        return "C"
+
+
+
+    elif score >= 40:
+
+        return "D"
+
+
+
+    else:
+
+        return "F"
+
+
+
+
+
+# ============================================================
+# RISK LEVEL
+# ============================================================
+
+
+def calculate_risk(score):
+
+
+    if score >= 85:
+
+
+        return "LOW"
+
+
+
+    elif score >= 60:
+
+
+        return "MEDIUM"
+
+
+
+    elif score >= 40:
+
+
+        return "HIGH"
+
+
+
+    else:
+
+
+        return "CRITICAL"
+
+
+
+
+
+# ============================================================
+# RECOMMENDATION ENGINE
+# ============================================================
+
+
+def generate_recommendations(
+
+        headers,
+
+        tls,
+
+        cookies,
+
+        waf
+
+):
+
+
+    recommendations = []
+
+
+
+    if not waf:
+
+
+        recommendations.append(
+
+            "No known WAF detected"
+
+        )
+
+
+
+    for item in headers["missing"]:
+
+
+        recommendations.append(
+
+            "Enable "
+
+            +
+
+            item["name"]
+
+        )
+
+
+
+    if tls["score"] < 100:
+
+
+        recommendations.append(
+
+            "Improve TLS certificate configuration"
+
+        )
+
+
+
+    if cookies["score"] < 100:
+
+
+        recommendations.append(
+
+            "Enable Secure and HttpOnly cookie flags"
+
+        )
+
+
+
+    if not recommendations:
+
+
+        recommendations.append(
+
+            "No major security improvements detected"
+
+        )
+
+
+
+    return recommendations# ============================================================
+# PART 7/8 - REPORT CREATOR + FINAL DISPLAY
+# ============================================================
+
+
+
+# ============================================================
+# REPORT CREATOR
+# ============================================================
+
+
+def create_report(
+
+        target,
+
+        basic,
+
+        waf,
+
+        headers,
+
+        tls,
+
+        dns,
+
+        cookies,
+
+        technology
+
+):
+
+
+    score = calculate_security_score(
+
+        waf,
+
+        headers,
+
+        tls,
+
+        cookies
+
+    )
+
+
+
+    report = {
+
+
+        "target":
+
+        target,
+
+
+        "time":
+
+        datetime.datetime.now().strftime(
+
+            "%Y-%m-%d %H:%M:%S"
+
+        ),
+
+
+        "basic_information":
+
+        basic,
+
+
+        "firewall":
+
+        waf,
+
+
+        "security_headers":
+
+        headers,
+
+
+        "tls":
+
+        tls,
+
+
+        "dns":
+
+        dns,
+
+
+        "cookies":
+
+        cookies,
+
+
+        "technology":
+
+        technology,
+
+
+        "security_score":
+
+        score,
+
+
+        "grade":
+
+        calculate_grade(
+
+            score
+
+        ),
+
+
+        "risk":
+
+        calculate_risk(
+
+            score
+
+        ),
+
+
+        "recommendations":
+
+        generate_recommendations(
+
+            headers,
+
+            tls,
+
+            cookies,
+
+            waf
+
+        )
+
+    }
+
+
+
+    return report
+
+
+
+
+
+# ============================================================
+# DISPLAY FINAL REPORT
+# ============================================================
+
+
+def display_final_report(report):
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\n========== SECURITY REPORT =========="
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    print(
+
+        "Target:",
+
+        report["target"]
+
+    )
+
+
+
+    print(
+
+        "Scan Time:",
+
+        report["time"]
+
+    )
+
+
+
+    print(
+
+        "Security Score:",
+
+        str(
+
+            report["security_score"]
+
+        )
+
+        +
+
+        "/100"
+
+    )
+
+
+
+    print(
+
+        "Grade:",
+
+        report["grade"]
+
+    )
+
+
+
+    print(
+
+        "Risk:",
+
+        report["risk"]
+
+    )
+
+
+
+
+    print(
+
+        Colors.YELLOW
+
+        +
+
+        "\nRecommendations:"
+
+        +
+
+        Colors.RESET
+
+    )
+
+
+
+    for item in report["recommendations"]:
+
+
+        print(
+
+            "-",
+
+            item
+
+        )
+
+
+
+    print(
+
+        Colors.CYAN
+
+        +
+
+        "\n===================================="
+
+        +
+
+        Colors.RESET
+
+    )# ============================================================
+# PART 8/8 - MAIN SYSTEM + MENU
+# ============================================================
+
+
+
+# ============================================================
+# WEBSITE SECURITY SCAN
+# ============================================================
+
+
+def website_scan():
+
+
+    clear_screen()
+
+    show_startup()
+
+
+
+    url = input(
+
+        Colors.YELLOW +
+
+        "Target URL: " +
+
+        Colors.RESET
+
+    )
+
+
+
+    url = normalize_url(url)
+
+
+
+    print(
+
+        "\nScanning:",
+
+        url
+
+    )
+
+
+
+    start = time.time()
+
+
+
+    response = send_request(url)
+
+
+
+    if response is None:
+
+
+        pause()
+
+        return
+
+
+
+
+    print(
+
+        Colors.GREEN +
+
+        "\nConnection successful" +
+
+        Colors.RESET
+
+    )
+
+
+
+
+    basic = get_basic_info(
+
+        url,
+
+        response
+
+    )
+
+
+
+    waf = analyze_waf(
+
+        response
+
+    )
+
+
+
+    headers = analyze_security_headers(
+
+        response
+
+    )
+
+
+
+    tls = analyze_tls(
+
+        url
+
+    )
+
+
+
+    dns = analyze_dns(
+
+        url
+
+    )
+
+
+
+    cookies = analyze_cookies(
+
+        response
+
+    )
+
+
+
+    technology = analyze_technology(
+
+        response
+
+    )
+
+
+
+    cdn = analyze_cdn(
+
+        response
+
+    )
+
+
+
+    report = create_report(
+
+        url,
+
+        basic,
+
+        waf,
+
+        headers,
+
+        tls,
+
+        dns,
+
+        cookies,
+
+        technology
+
+    )
+
+
+
+    report["cdn"] = cdn
+
+
+
+    elapsed = round(
+
+        time.time()
+
+        -
+
+        start,
+
+        2
+
+    )
+
+
+
+    report["scan_time"] = (
+
+        str(elapsed)
+
+        +
+
+        " seconds"
+
+    )
+
+
+
+    SCAN_HISTORY.append(
+
+        report
+
+    )
+
+
+
+    display_waf(
+
+        waf
+
+    )
+
+
+
+    display_security_headers(
+
+        headers
+
+    )
+
+
+
+    display_tls(
+
+        tls
+
+    )
+
+
+
+    display_dns(
+
+        dns
+
+    )
+
+
+
+    display_cookies(
+
+        cookies
+
+    )
+
+
+
+    display_final_report(
+
+        report
+
+    )
+
+
+
+    pause()
+
+
+
+
+
+# ============================================================
+# HISTORY
+# ============================================================
+
+
+def show_history():
+
+
+    clear_screen()
+
+    show_startup()
+
+
+
+    if not SCAN_HISTORY:
+
+
+        print(
+
+            Colors.YELLOW +
+
+            "No scan history"
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+
+    else:
+
+
+        print(
+
+            Colors.CYAN +
+
+            "\nScan History"
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+
+        for item in SCAN_HISTORY:
+
+
+            print(
+
+                "\nTarget:",
+
+                item["target"]
+
+            )
+
+
+            print(
+
+                "Score:",
+
+                item["security_score"]
+
+                ,
+
+                "/100"
+
+            )
+
+
+            print(
+
+                "Grade:",
+
+                item["grade"]
+
+            )
+
+
+
+    pause()
+
+
+
+
+
+# ============================================================
+# MAIN MENU
+# ============================================================
+
+
+def main():
+
+
+    while True:
+
+
+
+        clear_screen()
+
+        show_startup()
+
+
+
+        print(
+
+            Colors.CYAN +
+
+            """
+
+[1] Website Security Scan
+
+[2] Scan History
+
+[3] Exit
+
+
+"""
+
+            +
+
+            Colors.RESET
+
+        )
+
+
+
+        choice = input(
+
+            "Select: "
+
+        )
+
+
+
+
+        if choice == "1":
+
+
+            website_scan()
+
+
+
+        elif choice == "2":
+
+
+            show_history()
+
+
+
+        elif choice == "3":
+
+
+            print(
+
+                Colors.GREEN +
+
+                "Goodbye"
+
+                +
+
+                Colors.RESET
+
+            )
+
+
+            break
+
+
+
+        else:
+
+
+            print(
+
+                Colors.RED +
+
+                "Invalid option"
+
+                +
+
+                Colors.RESET
+
+            )
+
+
+            time.sleep(1)
+
+
+
+
+
+# ============================================================
+# PROGRAM START
+# ============================================================
+
+
+if __name__ == "__main__":
+
+
+    main()
